@@ -29,7 +29,7 @@ MathTidy.Notation = (function () {
 	const SCRIPT = { B: "ℬ", E: "ℰ", F: "ℱ", H: "ℋ", I: "ℐ", L: "ℒ", M: "ℳ", R: "ℛ" };
 	// Notation inside running text: a short Latin/Greek base followed by braced scripts
 	const INLINE = /[A-Za-zͰ-Ͽ][A-Za-z0-9Ͱ-Ͽ'′*]{0,11}(?:[_^]\{[^{}]*\})+/g;
-	const CHAR_ALIASES = { "'": "′", "’": "′", "∗": "*", "−": "-", "ϵ": "ε", "ϕ": "φ", "ϑ": "θ", "ϱ": "ρ", "ϖ": "π" };
+	const CHAR_ALIASES = { "∆": "Δ", "'": "′", "’": "′", "∗": "*", "−": "-", "ϵ": "ε", "ϕ": "φ", "ϑ": "θ", "ϱ": "ρ", "ϖ": "π" };
 
 	function styled(text, exceptions, capitalA) {
 		return Array.from(text, (ch) => {
@@ -142,17 +142,57 @@ MathTidy.Notation = (function () {
 		parent.append(text.slice(last));
 	}
 
+	// Combining accents that distinguish symbols, by the form they are compared in
+	const MARKS = {
+		"\u0302": "\u0302", "\u0303": "\u0303", "\u0304": "\u0304", "\u0305": "\u0304",
+		"\u0307": "\u0307", "\u0308": "\u0308", "\u030C": "\u030C", "\u20D7": "\u20D7",
+	};
+	// Accent glyphs that don't decompose to a combining mark
+	const SPACING_ACCENTS = { "ˆ": "\u0302", "^": "\u0302", "~": "\u0303", "ˉ": "\u0304", "ˇ": "\u030C" };
+
 	/**
-	 * Character as compared between glossary and PDF: math alphabets folded to
-	 * plain letters, glyph variants unified, spaces and combining marks dropped
+	 * Render a glossary entry's definition: the sentence it was taken from, with the
+	 * symbols in it typeset and the entry's own symbol emphasized
 	 */
-	function normalizeChar(char) {
-		let result = "";
-		for (let ch of char.normalize("NFKD")) {
-			if (/[\s{}\p{M}]/u.test(ch)) continue;
-			result += CHAR_ALIASES[ch] || ch;
+	function renderExcerpt(doc, parent, entry) {
+		if (!entry.parts) {
+			renderText(doc, parent, entry.meaning || "");
+			return;
 		}
-		return result;
+		for (let part of entry.parts) {
+			if (typeof part == "string") {
+				parent.append(part);
+				continue;
+			}
+			let math = doc.createElementNS(MathTidy.HTML_NS, part.t ? "strong" : "span");
+			math.className = "math-tidy-math";
+			render(doc, math, part.s);
+			parent.append(math);
+		}
+	}
+
+	/**
+	 * Character as compared between glossary and PDF: math alphabets folded to plain
+	 * letters, glyph variants unified, spaces dropped, and its accent (if any) separated
+	 *
+	 * @return {{ base: String, accent: String }}
+	 */
+	function splitAccent(char) {
+		let base = "";
+		let accent = "";
+		for (let ch of char.normalize("NFKD")) {
+			if (MARKS[ch]) accent ||= MARKS[ch];
+			else if (!/[\s{}\p{M}]/u.test(ch)) base += CHAR_ALIASES[ch] || ch;
+		}
+		return { base, accent };
+	}
+
+	/**
+	 * The accent, if a PDF character is an accent glyph on its own ("ˆ", "˜")
+	 */
+	function standaloneAccent(char) {
+		let { base, accent } = splitAccent(char);
+		return base ? SPACING_ACCENTS[base] || "" : accent;
 	}
 
 	function flatten(nodes, script, out) {
@@ -161,15 +201,21 @@ MathTidy.Notation = (function () {
 				flatten(node.children, script || node.script, out);
 				continue;
 			}
-			for (let ch of normalizeChar(node)) {
+			for (let ch of node.normalize("NFKD")) {
+				if (MARKS[ch]) {
+					if (out.length) out[out.length - 1].accent ||= MARKS[ch];
+					continue;
+				}
+				let { base } = splitAccent(ch);
+				if (!base) continue;
 				// Primes are typeset as superscripts
-				out.push({ ch, script: script || (ch == "′" ? 1 : 0) });
+				out.push({ ch: base, accent: "", script: script || (base == "′" ? 1 : 0) });
 			}
 		}
 	}
 
 	/**
-	 * The character sequences a symbol can have in a PDF's text: [{ ch, script }, ...].
+	 * The character sequences a symbol can have in a PDF's text: [{ ch, accent, script }, ...].
 	 * A subscript next to a superscript may be stored in either order, so both are returned.
 	 */
 	function variants(notation) {
@@ -190,5 +236,5 @@ MathTidy.Notation = (function () {
 		return [flat, swapped.flat()];
 	}
 
-	return { normalize, render, renderText, normalizeChar, variants };
+	return { normalize, render, renderText, renderExcerpt, splitAccent, standaloneAccent, variants };
 })();

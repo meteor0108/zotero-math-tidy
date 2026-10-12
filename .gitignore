@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Screen recordings (the README uses the GIF in docs/)
+*.mp4

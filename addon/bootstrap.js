@@ -5,8 +5,8 @@ function install() {}
 async function startup({ id, version, rootURI }) {
 	Services.scriptloader.loadSubScript(rootURI + "src/math-tidy.js");
 	Services.scriptloader.loadSubScript(rootURI + "src/notation.js");
-	Services.scriptloader.loadSubScript(rootURI + "src/llm.js");
 	Services.scriptloader.loadSubScript(rootURI + "src/matcher.js");
+	Services.scriptloader.loadSubScript(rootURI + "src/extractor.js");
 	Services.scriptloader.loadSubScript(rootURI + "src/reader.js");
 	Services.scriptloader.loadSubScript(rootURI + "src/section.js");
 

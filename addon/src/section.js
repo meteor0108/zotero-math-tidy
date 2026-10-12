@@ -91,7 +91,7 @@ MathTidy.Section = {
 		return best && best.isPDFAttachment() ? best : null;
 	},
 
-	async _render({ doc, body, item, setSectionSummary }) {
+	async _render({ doc, body, item, tabType, setSectionSummary }) {
 		this._build(doc, body);
 		let state = this._state(body);
 		let token = state.token = {};
@@ -115,6 +115,10 @@ MathTidy.Section = {
 		if (state.token !== token) return;
 		state.data = data;
 		this._update(body);
+		// Not analyzed yet, but open in the reader, where it can be read right away
+		if (!data && tabType == "reader" && await MathTidy.Reader.getState(attachment)) {
+			if (state.token === token) this._run(body);
+		}
 	},
 
 	async _run(body) {
@@ -169,11 +173,11 @@ MathTidy.Section = {
 		else if (!data) {
 			doc.l10n.setAttributes(status, "math-tidy-status-empty");
 		}
+		else if (!data.symbols.length) {
+			doc.l10n.setAttributes(status, "math-tidy-status-none");
+		}
 		else {
-			doc.l10n.setAttributes(status, "math-tidy-status-llm", {
-				count: data.symbols.length,
-				model: data.model || data.provider || "",
-			});
+			doc.l10n.setAttributes(status, "math-tidy-status-count", { count: data.symbols.length });
 		}
 
 		state.setSectionSummary?.(data ? String(data.symbols.length) : "");
@@ -198,12 +202,15 @@ MathTidy.Section = {
 			let symbolCell = this._element(doc, "div", "math-tidy-symbol");
 			MathTidy.Notation.render(doc, symbolCell, entry.symbol);
 			let meaningCell = this._element(doc, "div", "math-tidy-meaning");
-			MathTidy.Notation.renderText(doc, meaningCell, entry.meaning);
-			if (entry.where) {
+			MathTidy.Notation.renderExcerpt(doc, meaningCell, entry);
+			let where = entry.where || (Number.isInteger(entry.pageIndex) ? "p. " + (entry.pageIndex + 1) : "");
+			if (where) {
 				let whereLabel = this._element(doc, "span", "math-tidy-where");
-				whereLabel.textContent = entry.where;
+				whereLabel.textContent = where;
 				meaningCell.append(" ", whereLabel);
 			}
+			// A sentence that only uses the symbol, shown because none defines it
+			if (entry.definition === false) row.classList.add("math-tidy-usage");
 			row.append(symbolCell, meaningCell);
 			row.addEventListener("click", () => this._jump(body, index));
 			return row;

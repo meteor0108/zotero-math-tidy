@@ -1,8 +1,8 @@
 {
 	"manifest_version": 2,
 	"name": "Math Tidy",
-	"version": "0.2.0",
-	"description": "Collects the math symbols used in a paper into a glossary next to the PDF reader.",
+	"version": "0.3.0",
+	"description": "Lists the math symbols of a paper with the sentences that define them, next to the PDF reader.",
 	"author": "meteor0108",
 	"homepage_url": "https://github.com/meteor0108/zotero-math-tidy",
 	"icons": {

@@ -1,13 +1,17 @@
 /**
- * Glossary in the PDF reader: hovering a symbol shows its meaning, and the section
- * can jump to a symbol's occurrences.
+ * The PDF reader side of the glossary: reads the pages' character data that the
+ * glossary is built from, shows a symbol's definition when it is hovered, and jumps
+ * to a symbol's occurrences.
  *
- * The reader has no plugin API for either, so this reads the PDF view's internals
+ * The reader has no plugin API for any of this, so it reads the PDF view's internals
  * (_primaryView, _pdfPages, pointerEventToPosition).
  */
 MathTidy.Reader = {
 	// Zotero reader instance -> promise of its state (null if it isn't a PDF reader)
 	_attached: new Map(),
+
+	// PDFs up to this many pages are analyzed when opened; longer ones on request
+	AUTO_ANALYZE_MAX_PAGES: 80,
 
 	register() {
 		// Fires for every reader once its UI is up
@@ -51,6 +55,7 @@ MathTidy.Reader = {
 				return null;
 			});
 			this._attached.set(reader, promise);
+			promise.then(state => state && this._analyzeIfNew(state));
 		}
 		return promise;
 	},
@@ -87,9 +92,23 @@ MathTidy.Reader = {
 		return state;
 	},
 
+	// Build the glossary the first time a PDF is opened
+	async _analyzeIfNew(state) {
+		try {
+			let attachment = Zotero.Items.get(state.reader.itemID);
+			if (!attachment || state.analyzed || this.getPageCount(state) > this.AUTO_ANALYZE_MAX_PAGES) return;
+			await MathTidy.analyze(attachment);
+		}
+		catch (e) {
+			Zotero.logError(e);
+		}
+	},
+
 	async _loadGlossary(state) {
 		let attachment = Zotero.Items.get(state.reader.itemID);
 		let data = attachment && await MathTidy.load(attachment);
+		state.analyzed = !!data;
+		state.bodyFont = data?.bodyFont;
 		state.symbols = data?.symbols || [];
 		state.patterns = MathTidy.Matcher.compile(state.symbols);
 		state.pages.clear();
@@ -112,7 +131,7 @@ MathTidy.Reader = {
 		if (!occurrences) {
 			let patterns = state.patterns;
 			occurrences = this._getChars(state, pageIndex).then((chars) => {
-				let found = MathTidy.Matcher.find(chars, patterns);
+				let found = MathTidy.Matcher.find(chars, patterns, state.bodyFont);
 				// Unless the glossary changed meanwhile
 				if (state.patterns === patterns) state.pages.set(pageIndex, found);
 				return found;
@@ -120,6 +139,38 @@ MathTidy.Reader = {
 			state.pages.set(pageIndex, occurrences);
 		}
 		return occurrences;
+	},
+
+	getPageCount(state) {
+		return state.view._iframeWindow.PDFViewerApplication.pdfDocument.numPages;
+	},
+
+	/**
+	 * The state of the reader showing the attachment
+	 *
+	 * @param {Boolean} [open] - Open the PDF if no reader shows it
+	 * @return {Promise<Object|null>}
+	 */
+	async getState(attachment, open) {
+		let readers = Zotero.Reader._readers.filter(reader => reader.itemID == attachment.id);
+		let selectedTabID = Zotero.getMainWindow()?.Zotero_Tabs?.selectedID;
+		let reader = readers.find(reader => reader.tabID == selectedTabID) || readers[0];
+		if (!reader && open) {
+			await Zotero.Reader.open(attachment.id);
+			reader = Zotero.Reader._readers.find(reader => reader.itemID == attachment.id);
+		}
+		return reader ? this.attach(reader) : null;
+	},
+
+	/**
+	 * @return {Promise<Object[][]>} - The characters of every page
+	 */
+	async getAllChars(state) {
+		let pages = [];
+		for (let pageIndex = 0; pageIndex < this.getPageCount(state); pageIndex++) {
+			pages.push(await this._getChars(state, pageIndex));
+		}
+		return pages;
 	},
 
 	async _getChars(state, pageIndex) {
@@ -131,15 +182,17 @@ MathTidy.Reader = {
 				Components.utils.cloneInto({ pageIndex }, contentWindow)
 			);
 		}
-		// Copy what the matcher reads out of the content objects
+		// Copy what the matcher and extractor read out of the content objects
 		return Array.from(page?.chars || [], char => ({
 			c: char.c,
 			rect: Array.from(char.rect),
+			baseline: char.baseline,
 			fontSize: char.fontSize,
 			fontName: char.fontName,
 			italic: char.italic,
 			spaceAfter: char.spaceAfter,
 			lineBreakAfter: char.lineBreakAfter,
+			paragraphBreakAfter: char.paragraphBreakAfter,
 		}));
 	},
 
@@ -197,14 +250,8 @@ MathTidy.Reader = {
 				+ " margin-inline-end: 8px;";
 			MathTidy.Notation.render(doc, symbol, entry.symbol);
 			let meaning = doc.createElementNS(MathTidy.HTML_NS, "span");
-			MathTidy.Notation.renderText(doc, meaning, entry.meaning);
+			MathTidy.Notation.renderExcerpt(doc, meaning, entry);
 			tooltip.replaceChildren(symbol, meaning);
-			if (entry.where) {
-				let where = doc.createElementNS(MathTidy.HTML_NS, "span");
-				where.style.cssText = "opacity: 0.65; font-size: 0.85em; margin-inline-start: 6px;";
-				where.textContent = entry.where;
-				tooltip.append(where);
-			}
 		}
 		tooltip.style.display = "block";
 		let { width, height } = tooltip.getBoundingClientRect();
@@ -221,25 +268,29 @@ MathTidy.Reader = {
 	},
 
 	/**
-	 * Show the next place in the PDF where the symbol occurs, starting from the first
-	 * and wrapping around. Opens the PDF if it isn't open.
+	 * Show the symbol in the PDF: first where it is defined, then on each further call
+	 * its next occurrence, wrapping around. Opens the PDF if it isn't open.
 	 *
 	 * @return {Promise<Boolean>} - False if the symbol wasn't found in the PDF's text
 	 */
 	async jump(attachment, symbolIndex) {
-		let readers = Zotero.Reader._readers.filter(reader => reader.itemID == attachment.id);
-		let selectedTabID = Zotero.getMainWindow()?.Zotero_Tabs?.selectedID;
-		let reader = readers.find(reader => reader.tabID == selectedTabID) || readers[0];
-		if (!reader) {
-			await Zotero.Reader.open(attachment.id);
-			reader = Zotero.Reader._readers.find(reader => reader.itemID == attachment.id);
-			if (!reader) return false;
-		}
-		let state = await this.attach(reader);
+		let state = await this.getState(attachment, true);
 		if (!state) return false;
+		let { reader } = state;
+		let show = async (pageIndex, start, rect) => {
+			state.cursors.set(symbolIndex, { pageIndex, start });
+			if (reader.tabID) Zotero.getMainWindow()?.Zotero_Tabs?.select(reader.tabID);
+			await reader.navigate({ position: { pageIndex, rects: [rect] } });
+		};
 
-		let pageCount = state.view._iframeWindow.PDFViewerApplication.pdfDocument.numPages;
-		let cursor = state.cursors.get(symbolIndex) || { pageIndex: 0, start: -1 };
+		let entry = state.symbols[symbolIndex];
+		let cursor = state.cursors.get(symbolIndex);
+		if (!cursor && entry?.rect) {
+			await show(entry.pageIndex, entry.start, entry.rect);
+			return true;
+		}
+		cursor ||= { pageIndex: 0, start: -1 };
+		let pageCount = this.getPageCount(state);
 		// Rest of the cursor's page, then the following pages, then around to the cursor's page again
 		for (let step = 0; step <= pageCount; step++) {
 			let pageIndex = (cursor.pageIndex + step) % pageCount;
@@ -248,9 +299,7 @@ MathTidy.Reader = {
 				return occurrence.index == symbolIndex && (step > 0 || occurrence.start > cursor.start);
 			});
 			if (!next) continue;
-			state.cursors.set(symbolIndex, { pageIndex, start: next.start });
-			if (reader.tabID) Zotero.getMainWindow()?.Zotero_Tabs?.select(reader.tabID);
-			await reader.navigate({ position: { pageIndex, rects: [next.rect] } });
+			await show(pageIndex, next.start, next.rect);
 			return true;
 		}
 		return false;

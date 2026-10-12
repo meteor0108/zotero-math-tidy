@@ -69,3 +69,12 @@
 .math-tidy-math {
 	font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", serif;
 }
+
+.math-tidy-meaning strong {
+	font-weight: 700;
+}
+
+/* A sentence that uses the symbol without defining it */
+.math-tidy-usage .math-tidy-meaning {
+	color: var(--fill-secondary);
+}

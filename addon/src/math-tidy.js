@@ -92,23 +92,6 @@ MathTidy = {
 		this.Reader.unregister();
 	},
 
-	/**
-	 * Language the meanings are written in: the pref if set, otherwise the UI language
-	 */
-	getLanguage() {
-		let language = this.getPref("language").trim();
-		if (language) return language;
-		let uiLanguage = this.getPref("uiLanguage");
-		if (uiLanguage == "en") return "English";
-		if (uiLanguage == "ko") return "Korean";
-		try {
-			return new Intl.DisplayNames(["en"], { type: "language" }).of(Zotero.locale.split("-")[0]);
-		}
-		catch (e) {
-			return "English";
-		}
-	},
-
 	_cachePath(attachment) {
 		return PathUtils.join(
 			Zotero.DataDirectory.dir,
@@ -139,10 +122,11 @@ MathTidy = {
 	},
 
 	/**
-	 * Build the glossary for a PDF attachment with the configured LLM and save it.
+	 * Build the glossary for a PDF attachment from the PDF's own text and save it.
+	 * The PDF is read through the reader, which is opened if needed.
 	 * Concurrent calls for the same attachment share one run.
 	 *
-	 * @return {Promise<Object>} - { symbols: [{ symbol, meaning, where }], provider, model, ... }
+	 * @return {Promise<Object>} - { symbols: [{ symbol, parts, meaning, pageIndex, ... }], bodyFont, ... }
 	 */
 	analyze(attachment) {
 		let job = this.jobs.get(attachment.id);
@@ -154,20 +138,16 @@ MathTidy = {
 	},
 
 	async _analyze(attachment) {
-		let provider = this.getPref("provider");
-		let { symbols, model, input } = await this.LLM.extract(attachment, provider);
-		let data = { version: 1, created: new Date().toISOString(), provider, model, input, symbols };
+		let state = await this.Reader.getState(attachment, true);
+		if (!state) {
+			throw new this.Error("math-tidy-error-no-reader");
+		}
+		let pages = await this.Reader.getAllChars(state);
+		let { symbols, bodyFont } = this.Extractor.extract(pages);
+		let data = { version: 2, created: new Date().toISOString(), bodyFont, symbols };
 		await this.save(attachment, data);
 		await this.Reader.refresh(attachment.id);
 		return data;
-	},
-
-	async getText(attachment) {
-		let text = await attachment.attachmentText;
-		if (!text || !text.trim()) {
-			throw new this.Error("math-tidy-error-no-text");
-		}
-		return text;
 	},
 
 	/**
