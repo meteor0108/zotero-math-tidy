@@ -12,6 +12,9 @@ var MathTidyPrefs = {
 	init() {
 		document.getElementById("math-tidy-ui-language")
 			.addEventListener("command", () => this.applyUILanguage());
+		this.showProvider();
+		document.getElementById("math-tidy-provider")
+			.addEventListener("command", () => this.showProvider());
 		for (let provider of this.PROVIDERS) {
 			this.fillModels(provider);
 			this.refreshModels(provider, false);
@@ -35,6 +38,16 @@ var MathTidyPrefs = {
 		// Swapping the file doesn't update what is already on screen
 		let translated = document.querySelectorAll('[data-l10n-id^="math-tidy-"]');
 		if (translated.length) document.l10n.translateElements([...translated]);
+	},
+
+	/**
+	 * Show the API key and model fields of the selected provider only
+	 */
+	showProvider() {
+		let selected = this.getPref("provider");
+		for (let provider of this.PROVIDERS) {
+			document.getElementById("math-tidy-provider-" + provider).hidden = provider != selected;
+		}
 	},
 
 	getModels(provider) {
