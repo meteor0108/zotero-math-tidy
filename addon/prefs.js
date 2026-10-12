@@ -1,0 +1,14 @@
+pref("extensions.math-tidy.uiLanguage", "auto");
+pref("extensions.math-tidy.provider", "anthropic");
+pref("extensions.math-tidy.input", "pdf");
+pref("extensions.math-tidy.language", "");
+pref("extensions.math-tidy.anthropic.apiKey", "");
+pref("extensions.math-tidy.anthropic.model", "claude-opus-5-5");
+pref("extensions.math-tidy.anthropic.models", "[\"claude-opus-5-5\",\"claude-sonnet-5-5\",\"claude-haiku-5-5\",\"claude-fable-5-1\"]");
+pref("extensions.math-tidy.openai.apiKey", "");
+pref("extensions.math-tidy.openai.model", "gpt-5");
+pref("extensions.math-tidy.openai.models", "[\"gpt-5\",\"gpt-5-mini\"]");
+pref("extensions.math-tidy.openai.baseURL", "https://api.openai.com/v1");
+pref("extensions.math-tidy.gemini.apiKey", "");
+pref("extensions.math-tidy.gemini.model", "gemini-2.5-flash");
+pref("extensions.math-tidy.gemini.models", "[\"gemini-2.5-flash\",\"gemini-2.5-pro\"]");
